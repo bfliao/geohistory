@@ -27,7 +27,7 @@ node serve.js 8080
 
 脚本先运行 `node build_site.js` 把 `web/` 打包成完整静态站点（`_site/`），再提交到 `gh-pages` 分支并推送。线上地址：https://bfliao.github.io/geohistory/
 
-首次部署需要在仓库 Settings → Pages 里把 Source 设为 “Deploy from a branch”，分支选 `gh-pages`、目录选 `/ (root)`。
+首次推送 `gh-pages` 分支时 GitHub 已自动启用 Pages（来源：`gh-pages` 分支根目录）。如需更改，在仓库 Settings → Pages 里设置。
 
 ## 重建数据
 
