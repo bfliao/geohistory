@@ -73,9 +73,9 @@ button,input,select{font:inherit;color:inherit}
 .checks small{color:var(--ink-3)}
 select{background:var(--panel-2);border:1px solid var(--line);border-radius:4px;padding:3px 6px}
 .row{display:flex;align-items:center;gap:8px;justify-content:space-between}
-#routeList{display:flex;flex-direction:column}
-#routeList button{all:unset;cursor:pointer;padding:3px 6px;border-radius:4px;display:flex;gap:8px;align-items:baseline}
-#routeList button:hover{background:var(--panel-2)}
+#routeList,#ngList{display:flex;flex-direction:column}
+#routeList button,#ngList button{all:unset;cursor:pointer;padding:3px 6px;border-radius:4px;display:flex;gap:8px;align-items:baseline}
+#routeList button:hover,#ngList button:hover{background:var(--panel-2)}
 #routeList .yr,.yr{font-family:var(--f-num);font-size:11px;color:var(--ink-3);white-space:nowrap;font-variant-numeric:tabular-nums}
 .src{font-size:11px;color:var(--ink-3);line-height:1.45}
 .src a{color:inherit}
@@ -144,6 +144,7 @@ select{background:var(--panel-2);border:1px solid var(--line);border-radius:4px;
       <div>
         <div class="lab">事件类别（当前时段条数）</div>
         <div class="chips" id="chips"></div>
+        <div class="src" style="margin:4px 6px">空心圆是范围性事件（战争、政权建立等），位置仅为代表点。</div>
         <div class="row" style="margin-top:6px"><label for="imp">显示范围</label>
           <select id="imp"><option value="0">全部事件</option><option value="5">较知名（≥5 个语言版本）</option><option value="20">知名（≥20 个语言版本）</option></select></div>
       </div>
@@ -155,6 +156,10 @@ select{background:var(--panel-2);border:1px solid var(--line);border-radius:4px;
       <div id="routeBox" hidden>
         <div class="lab">当前时段的迁徙与远征</div>
         <div id="routeList"></div>
+      </div>
+      <div id="ngBox" hidden>
+        <div class="lab">当前时段的大范围事件（无精确地点，不标点）</div>
+        <div id="ngList"></div>
       </div>
       <div class="src">点击地图任意位置，查看该地周边在各个时期发生的事件。<br>
         数据：<a href="https://www.wikidata.org" target="_blank" rel="noopener">Wikidata</a>（CC0）、<a href="https://pleiades.stoa.org" target="_blank" rel="noopener">Pleiades</a>（CC BY）、CHGIS V6（哈佛大学与复旦大学）、<a href="https://www.geonames.org" target="_blank" rel="noopener">GeoNames</a>（CC BY）、Natural Earth、<a href="https://github.com/aourednik/historical-basemaps" target="_blank" rel="noopener">historical-basemaps</a>（GPL-3.0）。迁徙路线为手工整理的近似示意；疆域为若干年份的近似快照。</div>
@@ -192,6 +197,7 @@ const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp
 const CATS = ['战争与冲突','政治','灾害与事故','建城与建造','文化与科技','其他'];
 const KIND = {m:'迁徙', x:'远征与扩张', v:'航海探险', f:'强制迁移', c:'殖民与移民'};
 const SRC = ['Pleiades','CHGIS','Wikidata'];
+const PRN = ['', '位置取自条目登记的所在地（城市或建筑一级）', '范围性事件，位置仅为代表点'];
 const POL_YEARS = [-123000,-10000,-8000,-5000,-4000,-3000,-2000,-1500,-1000,-700,-500,-400,-323,-300,-200,-100,-1,100,200,300,400,500,600,700,800,900,1000,1100,1200,1279,1300,1400,1492,1500,1530,1600,1650,1700,1715,1783,1800,1815,1878,1880,1900,1914,1920,1930,1938,1945,1960,1994,2000,2010];
 const POL_TINT = ['#c98f6b','#6f9fc4','#9bb86a','#b58bc2','#d0b45c','#6fb7a8','#c57f8f','#8c93cf'];
 
@@ -209,7 +215,7 @@ const fspan = (a, b) => (a === b || b == null) ? fy(a) : fy(a) + '–' + fy(b);
 /* ---------- state ---------- */
 const S = { uc: y2u(-215), uw: 0.012, cats: new Set([0,1,2,3,4,5]), imp: 0, playing: false, sel: null, radiusMode: 0,
   layers: { events:true, context:true, settlements:true, routes:true, polities:true, borders:false, labels:true } };
-let E, ST, ROUTES = [], LAB, POLZH = {}, map, overlay, theme = {};
+let E, ST, NG = null, ROUTES = [], LAB, POLZH = {}, map, overlay, theme = {};
 let gridE, gridS, longEv = [], activeRoutes = [], labels = [], cityDots = [], polFeat = [], polYear = null, polCache = {};
 let tripT = 0, needLayers = true;
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -252,11 +258,11 @@ async function load(){
   LAB = lab;
   msg('正在载入历史事件…');
   const [ev, evd, st, ro, pz] = await Promise.all([getJSON('data/events.json'), getJSON('data/events_d.json'), getJSON('data/settlements.json'), getJSON('data/routes.json'), getJSON('data/polity_zh.json', true)]);
-  ev.d = evd.d;
+  ev.d = evd.d; NG = await getJSON('data/events_nogeo.json', true);
   POLZH = pz || {};
   const n = ev.n.length;
   E = { n, name: ev.n, desc: ev.d, y: Int32Array.from(ev.y), e: new Int32Array(n), md: ev.md, lon: Float32Array.from(ev.x), lat: Float32Array.from(ev.la),
-        c: Uint8Array.from(ev.c), s: Uint16Array.from(ev.s), p: ev.p, q: ev.q, w: ev.w, t: ev.t, types: ev.types, places: ev.places, r: new Float32Array(n) };
+        c: Uint8Array.from(ev.c), pr: Uint8Array.from(ev.pr || new Array(n).fill(0)), s: Uint16Array.from(ev.s), p: ev.p, q: ev.q, w: ev.w, t: ev.t, types: ev.types, places: ev.places, r: new Float32Array(n) };
   for (let i = 0; i < n; i++){ E.e[i] = ev.e[i] ? ev.e[i] : E.y[i]; E.r[i] = E.c[i] === 3 ? 1.8 + .3*Math.sqrt(Math.min(E.s[i], 130)) : 2.2 + 1.05*Math.sqrt(Math.min(E.s[i], 130)); if (E.e[i] > E.y[i] + 1) longEv.push(i); }
   const m = st.n.length;
   ST = { n: m, name: st.n, lon: Float32Array.from(st.x), lat: Float32Array.from(st.y), a: Int32Array.from(st.a), b: Int32Array.from(st.b), s: st.s, t: st.t, d: st.d, id: st.id, types: st.types };
@@ -301,7 +307,7 @@ function initMap(g){
 }
 
 function tip(info){ if (!info.layer || info.index < 0) return null; const id = info.layer.id, i = info.index; let h = '';
-  if (id === 'events') h = `<b>${esc(E.name[i])}</b><br>${fspan(E.y[i], E.e[i])} · ${esc(E.types[E.t[i]] || CATS[E.c[i]])}${E.p[i] >= 0 ? '<br>' + esc(placeStr(E.p[i])) : ''}`;
+  if (id === 'events') h = `<b>${esc(E.name[i])}</b><br>${fspan(E.y[i], E.e[i])} · ${esc(E.types[E.t[i]] || CATS[E.c[i]])}${E.p[i] >= 0 ? '<br>' + esc(placeStr(E.p[i])) : ''}${PRN[E.pr[i]] ? '<br><span style="opacity:.7">' + PRN[E.pr[i]] + '</span>' : ''}`;
   else if (id === 'settlements') h = `<b>${esc(ST.name[i])}</b><br>${esc(ST.types[ST.t[i]])} · 存续 ${fspan(ST.a[i], ST.b[i])}<br><span style="opacity:.7">${SRC[ST.s[i]]}</span>`;
   else if (id === 'routes' && info.object) h = `<b>${esc(info.object.n)}</b><br>${KIND[info.object.k]} · ${fspan(info.object.a, info.object.b)}`;
   else return null;
@@ -325,7 +331,7 @@ function buildLabels(){
     const ok = j => S.cats.has(E.c[j]) && E.s[j] >= Math.max(S.imp, 3);
     for (; i < end; i++) if (ok(i)) cand.push(i);
     for (const j of longEv) if (E.y[j] < a && E.e[j] >= a && ok(j)) cand.push(j);
-    const score = j => E.s[j]*(E.c[j] === 3 ? .25 : 1); cand.sort((p, q) => score(q) - score(p));
+    const score = j => E.s[j]*(E.c[j] === 3 ? .25 : 1)*(E.pr[j] === 2 ? .5 : 1); cand.sort((p, q) => score(q) - score(p));
     let nAdd = 0; for (const j of cand){ if (nAdd >= 36) break; const t = E.name[j]; if (tryAdd(t.length > 16 ? t.slice(0, 15) + '…' : t, E.lon[j], E.lat[j], 12.5, theme.ink, 'start', E.r[j] + 4, true)) nAdd++; } }
   if (S.layers.polities) for (const f of polFeat){ const px = f.span * 256 * Math.pow(2, z) / 360; if (px < 60) continue; tryAdd(f.name, f.c[0], f.c[1], px > 300 ? 15 : 12, theme.ink2, 'middle', 0, false); }
   if (S.layers.labels){
@@ -353,8 +359,9 @@ function buildLayers(){
     L.push(new D.PathLayer({ id:'routes', data:activeRoutes, pickable:true, getPath:d => d.path, getColor:[...theme.route, 110], widthUnits:'pixels', getWidth:d => 1 + d.w*.9, capRounded:true, jointRounded:true, updateTriggers:{ getColor:colorVersion } }));
     if (!reduceMotion) L.push(new D.TripsLayer({ id:'trips', data:activeRoutes, getPath:d => d.path, getTimestamps:d => d.ts, getColor:theme.route, widthUnits:'pixels', getWidth:d => 2.5 + d.w*1.2, capRounded:true, jointRounded:true, fadeTrail:true, trailLength:260, currentTime:tripT, updateTriggers:{ getColor:colorVersion } })); }
   if (S.layers.events) L.push(new D.ScatterplotLayer({ id:'events', data:{ length: E.n }, pickable:true, getPosition:posE, radiusUnits:'pixels', radiusScale:rs, getRadius:(_, { index }) => E.r[index], radiusMinPixels:2,
-    getFillColor:(_, { index, target }) => { const c = theme.cat[E.c[index]]; target[0] = c[0]; target[1] = c[1]; target[2] = c[2]; target[3] = 225; return target; },
-    stroked:true, lineWidthUnits:'pixels', getLineWidth:1, getLineColor:[...theme.landRgb, 255],
+    getFillColor:(_, { index, target }) => { const c = theme.cat[E.c[index]]; target[0] = c[0]; target[1] = c[1]; target[2] = c[2]; target[3] = E.pr[index] === 2 ? 55 : 225; return target; },
+    stroked:true, lineWidthUnits:'pixels', getLineWidth:(_, { index }) => E.pr[index] === 2 ? 1.6 : 1,
+    getLineColor:(_, { index, target }) => { const c = E.pr[index] === 2 ? theme.cat[E.c[index]] : theme.landRgb; target[0] = c[0]; target[1] = c[1]; target[2] = c[2]; target[3] = 255; return target; },
     extensions:[new D.DataFilterExtension({ filterSize:3, categorySize:1 })],
     getFilterValue:(_, { index, target }) => { target[0] = E.y[index]; target[1] = E.e[index]; target[2] = E.s[index]; return target; },
     filterRange:[[-2e6, b], [a, 2e6], [S.imp, 1e6]], getFilterCategory:(_, { index }) => E.c[index], filterCategories:cats, updateTriggers:{ getFillColor:colorVersion, getLineColor:colorVersion } }));
@@ -401,6 +408,13 @@ function onWindow(){
   $('stat').textContent = `${total.toLocaleString('en')} 件事件 · ${ns.toLocaleString('en')} 处聚居地 · ${activeRoutes.length} 条迁徙与远征路线`;
   const rl = $('routeList'); rl.innerHTML = ''; $('routeBox').hidden = !activeRoutes.length || !S.layers.routes;
   for (const r of activeRoutes){ const bt = document.createElement('button'); bt.innerHTML = `<span>${esc(r.n)}</span><span class="yr" style="margin-left:auto">${fspan(r.a, r.b)}</span>`; bt.onclick = () => showRoute(r, true); rl.appendChild(bt); }
+  // large-area events of this period: listed, never pinned
+  const ngl = $('ngList'); ngl.innerHTML = ''; let ngN = 0;
+  if (NG){ const act = []; for (let i = 0; i < NG.n.length; i++){ if (NG.y[i] > b) break; if ((NG.e[i] || NG.y[i]) >= a && S.cats.has(NG.c[i]) && NG.s[i] >= S.imp) act.push(i); }
+    ngN = act.length; act.sort((p, q) => NG.s[q] - NG.s[p]);
+    for (const i of act.slice(0, 30)){ const bt = document.createElement('button'); bt.innerHTML = `<span style="min-width:0;overflow-wrap:anywhere">${esc(NG.n[i])}</span><span class="yr" style="margin-left:auto">${fspan(NG.y[i], NG.e[i] || NG.y[i])}</span>`; bt.onclick = () => showNogeo(i); ngl.appendChild(bt); }
+    if (ngN > 30){ const m = document.createElement('div'); m.className = 'src'; m.style.padding = '2px 6px'; m.textContent = `按知名度列出前 30 件，共 ${ngN} 件。`; ngl.appendChild(m); } }
+  $('ngBox').hidden = !ngN;
   $('tl').setAttribute('aria-valuetext', $('range').textContent);
   updatePolity(); drawTL(); labelsDirty = true; needLayers = true;
   if (S.sel) markNow();
@@ -449,24 +463,26 @@ function stopPlay(){ if (S.playing){ S.playing = false; $('play').textContent = 
 const RADII = [0, 10, 25, 50, 100, 200];
 function autoKm(lat){ const mpp = 156543.03*Math.cos(lat*Math.PI/180)/Math.pow(2, map.getZoom() + 1); return Math.max(8, Math.min(250, Math.round(mpp*26/1000))); }
 function selectAt(lon, lat){ lon = ((lon + 540) % 360) - 180; const km = RADII[S.radiusMode] || autoKm(lat); S.sel = { lon, lat, km }; S.route = null; renderPanel(); needLayers = true; }
-let panelRows = [], shown = 0;
+let panelRows = [], areaRows = [], shown = 0;
 function renderPanel(){
   const { lon, lat, km } = S.sel, ev = near(gridE, lon, lat, km), st = near(gridS, lon, lat, km);
   ev.sort((p, q) => E.y[p[0]] - E.y[q[0]] || E.s[q[0]] - E.s[p[0]]);
   // nearest known modern place: closest event's place within radius, weighted by distance
-  let pl = -1, best = 1e9; for (const [i, d] of ev) if (E.p[i] >= 0){ const P = E.places[E.p[i]], dd = hav(lon, lat, P[4], P[5]); if (dd < best){ best = dd; pl = E.p[i]; } }
+  let pl = -1, best = 1e9; for (const [i, d] of ev) if (E.p[i] >= 0 && E.pr[i] < 2){ const P = E.places[E.p[i]], dd = hav(lon, lat, P[4], P[5]); if (dd < best){ best = dd; pl = E.p[i]; } }
   const P = pl >= 0 ? E.places[pl] : null;
   $('pTitle').textContent = P ? P[0] : (st.length ? ST.name[st.sort((p, q) => p[1] - q[1])[0][0]] + ' 一带' : '所选地点');
   $('pSub').textContent = (P ? [P[1], P[2], P[3]].filter((v, i, a) => v && v !== P[0] && a.indexOf(v) === i).join(' · ') + ' · ' : '') + `${Math.abs(lat).toFixed(2)}°${lat >= 0 ? 'N' : 'S'} ${Math.abs(lon).toFixed(2)}°${lon >= 0 ? 'E' : 'W'}`;
   let pol = ''; if (S.layers.polities && polYear != null){ const f = map.queryRenderedFeatures(map.project([lon, lat]), { layers:['pol-fill'] })[0]; if (f) pol = `${fyl(polYear)}前后属 <b>${esc(f.properties.zh)}</b>`; }
-  $('panelMeta').innerHTML = `<div class="row"><span>半径 ${km} km 内：${ev.length} 件事件，${st.length} 处历史聚居地</span>
+  $('panelMeta').innerHTML = `<div class="row"><span>半径 ${km} km 内：${ev.filter(x => E.pr[x[0]] < 2).length} 件事件，${st.length} 处历史聚居地</span>
     <select id="rad" aria-label="查询半径">${RADII.map((r, i) => `<option value="${i}"${i === S.radiusMode ? ' selected' : ''}>${r ? r + ' km' : '自动'}</option>`).join('')}</select></div>${pol ? '<div>' + pol + '</div>' : ''}`;
   $('rad').onchange = e => { S.radiusMode = +e.target.value; selectAt(lon, lat); };
-  panelRows = ev.map(x => x[0]); shown = 0;
+  panelRows = ev.map(x => x[0]).filter(i => E.pr[i] < 2); areaRows = ev.map(x => x[0]).filter(i => E.pr[i] === 2); shown = 0;
   const body = $('panelBody'); body.innerHTML = '';
-  if (!ev.length && !st.length){ body.innerHTML = '<div class="empty">这个范围内没有记录。可以放大查询半径，或点击地图上有灰点的位置。</div>'; }
-  if (ev.length){ const h = document.createElement('div'); h.className = 'sec'; h.innerHTML = '<span>事件（按年代）</span><span>高亮为当前时段</span>'; body.appendChild(h);
+  if (!panelRows.length && !areaRows.length && !st.length){ body.innerHTML = '<div class="empty">这个范围内没有记录。可以放大查询半径，或点击地图上有灰点的位置。</div>'; }
+  if (panelRows.length){ const h = document.createElement('div'); h.className = 'sec'; h.innerHTML = '<span>事件（按年代）</span><span>高亮为当前时段</span>'; body.appendChild(h);
     const list = document.createElement('div'); list.id = 'evList'; body.appendChild(list); const more = document.createElement('button'); more.className = 'more'; more.id = 'more'; body.appendChild(more); more.onclick = () => addRows(200); addRows(150); }
+  if (areaRows.length){ const h = document.createElement('div'); h.className = 'sec'; h.innerHTML = '<span>范围性事件（位置仅为代表点，未必发生在此地）</span>'; body.appendChild(h);
+    const fr = document.createDocumentFragment(), w = win(); for (const i of areaRows.slice(0, 100)) fr.appendChild(evRow(i, w)); body.appendChild(fr); }
   if (st.length){ st.sort((p, q) => ST.a[p[0]] - ST.a[q[0]]); const h = document.createElement('div'); h.className = 'sec'; h.innerHTML = '<span>历史聚居地与治所</span><span>存续年代</span>'; body.appendChild(h);
     const { a, b } = win(); const fr = document.createDocumentFragment();
     for (const [i] of st.slice(0, 200)){ const d = document.createElement('div'); d.className = 'ev' + (ST.a[i] <= b && ST.b[i] >= a ? ' now' : ''); d.dataset.s = i;
@@ -476,17 +492,25 @@ function renderPanel(){
     body.appendChild(fr); if (st.length > 200){ const m = document.createElement('div'); m.className = 'empty'; m.textContent = `另有 ${st.length - 200} 处未列出，缩小半径可查看。`; body.appendChild(m); } }
   $('panel').hidden = false; body.scrollTop = 0; scrollToNow();
 }
-function addRows(k){ const list = $('evList'), { a, b } = win(), fr = document.createDocumentFragment(), end = Math.min(panelRows.length, shown + k);
-  for (; shown < end; shown++){ const i = panelRows[shown], d = document.createElement('div'); d.className = 'ev' + (E.y[i] <= b && E.e[i] >= a ? ' now' : ''); d.dataset.i = i;
-    const md = E.md[i] ? ` ${Math.floor(E.md[i]/100)}月${E.md[i]%100}日` : '';
-    const wiki = E.w[i] ? `<a href="https://www.wikidata.org/wiki/Special:GoToLinkedPage/${E.w[i] === 1 ? 'zhwiki' : 'enwiki'}/Q${E.q[i]}" target="_blank" rel="noopener">维基百科${E.w[i] === 2 ? '（英文）' : ''}</a>` : '';
-    d.innerHTML = `<div class="y">${fspan(E.y[i], E.e[i])}</div><div class="t">${esc(E.name[i])}</div>
-      <div class="m"><span class="tag"><span class="dot" style="background:var(--c${E.c[i]})"></span>${esc(E.types[E.t[i]] || CATS[E.c[i]])}${md}</span>${E.p[i] >= 0 ? esc(E.places[E.p[i]][0]) : ''}</div>
-      ${E.desc[i] ? `<div class="m">${esc(E.desc[i])}</div>` : ''}<div class="m">${wiki}<a href="https://www.wikidata.org/wiki/Q${E.q[i]}" target="_blank" rel="noopener">Wikidata</a></div>`;
-    d.onclick = e => { if (e.target.tagName !== 'A') setYear(E.y[i], true); }; fr.appendChild(d); }
+function evRow(i, w){ const d = document.createElement('div'); d.className = 'ev' + (E.y[i] <= w.b && E.e[i] >= w.a ? ' now' : ''); d.dataset.i = i;
+  const md = E.md[i] ? ` ${Math.floor(E.md[i]/100)}月${E.md[i]%100}日` : '';
+  const wiki = E.w[i] ? `<a href="https://www.wikidata.org/wiki/Special:GoToLinkedPage/${E.w[i] === 1 ? 'zhwiki' : 'enwiki'}/Q${E.q[i]}" target="_blank" rel="noopener">维基百科${E.w[i] === 2 ? '（英文）' : ''}</a>` : '';
+  d.innerHTML = `<div class="y">${fspan(E.y[i], E.e[i])}</div><div class="t">${esc(E.name[i])}</div>
+    <div class="m"><span class="tag"><span class="dot" style="background:var(--c${E.c[i]})"></span>${esc(E.types[E.t[i]] || CATS[E.c[i]])}${md}</span>${E.p[i] >= 0 && E.pr[i] < 2 ? esc(E.places[E.p[i]][0]) : ''}</div>
+    ${E.desc[i] ? `<div class="m">${esc(E.desc[i])}</div>` : ''}${E.pr[i] === 1 ? `<div class="m" style="color:var(--ink-3)">${PRN[1]}</div>` : ''}<div class="m">${wiki}<a href="https://www.wikidata.org/wiki/Q${E.q[i]}" target="_blank" rel="noopener">Wikidata</a></div>`;
+  d.onclick = e => { if (e.target.tagName !== 'A') setYear(E.y[i], true); }; return d; }
+function addRows(k){ const list = $('evList'), w = win(), fr = document.createDocumentFragment(), end = Math.min(panelRows.length, shown + k);
+  for (; shown < end; shown++) fr.appendChild(evRow(panelRows[shown], w));
   list.appendChild(fr); const more = $('more'); more.hidden = shown >= panelRows.length; more.textContent = `再显示 ${Math.min(200, panelRows.length - shown)} 条（共 ${panelRows.length} 条）`; }
 function markNow(){ const { a, b } = win(); document.querySelectorAll('#panelBody .ev').forEach(d => { if (d.dataset.i != null){ const i = +d.dataset.i; d.classList.toggle('now', E.y[i] <= b && E.e[i] >= a); } else if (d.dataset.s != null){ const i = +d.dataset.s; d.classList.toggle('now', ST.a[i] <= b && ST.b[i] >= a); } }); }
 function scrollToNow(){ const el = document.querySelector('#panelBody .ev.now'); if (el) $('panelBody').scrollTop = Math.max(0, el.offsetTop - 60); }
+function showNogeo(i){ S.sel = null; needLayers = true;
+  $('pTitle').textContent = NG.n[i]; $('pSub').textContent = `${CATS[NG.c[i]]} · ${fspan(NG.y[i], NG.e[i] || NG.y[i])}`;
+  const reg = NG.regions[NG.r[i]];
+  $('panelMeta').innerHTML = `<div>${reg ? '登记的地点是“' + esc(reg) + '”，范围超过市县一级，' : '坐标与登记的地点互相矛盾，'}地图上不标点。</div>`;
+  const wiki = NG.w[i] ? `<a href="https://www.wikidata.org/wiki/Special:GoToLinkedPage/${NG.w[i] === 1 ? 'zhwiki' : 'enwiki'}/Q${NG.q[i]}" target="_blank" rel="noopener">维基百科${NG.w[i] === 2 ? '（英文）' : ''}</a>` : '';
+  $('panelBody').innerHTML = `<div class="ev" style="cursor:default;grid-template-columns:1fr"><div class="m" style="grid-column:1;color:var(--ink)">${esc(NG.d[i])}</div><div class="m" style="grid-column:1">${wiki}<a href="https://www.wikidata.org/wiki/Q${NG.q[i]}" target="_blank" rel="noopener">Wikidata</a></div></div>`;
+  $('panel').hidden = false; }
 function showRoute(r, fly){ S.sel = null; needLayers = true;
   $('pTitle').textContent = r.n; $('pSub').textContent = `${KIND[r.k]} · ${fspan(r.a, r.b)}`;
   $('panelMeta').innerHTML = '<div>路线为手工整理的近似示意，途经点和年代仅供参考。</div>'; $('panelBody').innerHTML = `<div class="empty" style="color:var(--ink)">${esc(r.d)}</div>`; $('panel').hidden = false;
