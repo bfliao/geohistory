@@ -499,6 +499,56 @@ def fix_positions(items, cl, places, classes):
     return nogeo, report, region
 
 
+# ---------------------------------------------------------------- other sources (see external.py)
+DEDUP_KM = {"地震": 150, "海啸": 300, "火山喷发": 40}
+NO_DEDUP = {"reaches", "plague"}   # dense local records; nothing comparable in the other sources
+
+
+def merge_external(rows):
+    """Append events from the non-Wikidata sources, skipping those already present (same kind, year +-1, nearby)."""
+    path = os.path.join(WORK, "ext_events.json")
+    src_list = [{"k": "wd", "n": "Wikidata", "lic": "CC0", "url": "https://www.wikidata.org/wiki/Q{u}"}]
+    index = {"wd": 0}
+    if not os.path.exists(path):
+        return {"list": src_list, "index": index}, {}
+    ext = json.load(open(path, encoding="utf-8"))
+    for k, (name, lic, url) in ext["sources"].items():
+        if k != "wd":
+            index[k] = len(src_list)
+            src_list.append({"k": k, "n": name, "lic": lic, "url": url})
+    buckets = {}
+
+    def add(cat, y, pt):
+        buckets.setdefault((cat, y), []).append(pt)
+
+    def seen(cat, y, pt, km):
+        for yy in (y - 1, y, y + 1):
+            for q in buckets.get((cat, yy), ()):
+                if abs(q[1] - pt[1]) < 3 and km_between(pt, q) <= km:
+                    return True
+        return False
+
+    for r in rows:
+        add(r[2], r[1]["y"], r[1]["pt"])
+    stats = {}
+    for x in ext["events"]:
+        st = stats.setdefault(x["src"], {"total": 0, "added": 0, "already_present": 0})
+        st["total"] += 1
+        pt = (x["lon"], x["lat"])
+        if x["src"] not in NO_DEDUP and seen(x["c"], x["y"], pt, DEDUP_KM.get(x["t"], 30)):
+            st["already_present"] += 1
+            continue
+        st["added"] += 1
+        add(x["c"], x["y"], pt)
+        it = {"y": x["y"], "e": x["e"] or None, "md": x["md"], "pt": pt, "sl": x["s"], "pr": x["pr"], "jobs": {"ext"},
+              "diss": None, "src": x["src"], "u": x["u"], "np": x.get("np", 0)}
+        rows.append(["Q0", it, x["c"], "=" + x["t"], False, x["n"], x["d"], 0])
+    print("external sources:", flush=True)
+    for k, v in stats.items():
+        print(f"  {k:8s} total {v['total']:6d}  added {v['added']:6d}  already present {v['already_present']:6d}", flush=True)
+    return {"list": src_list, "index": index}, stats
+
+
 def xyz(lon, lat):
     lon = np.radians(lon); lat = np.radians(lat)
     return np.column_stack([np.cos(lat) * np.cos(lon), np.cos(lat) * np.sin(lon), np.sin(lat)])
@@ -547,7 +597,7 @@ def main():
         if not lab or not lab[0] or re.fullmatch(r"Q\d+", lab[0]):
             continue
         it = items[q]
-        (lost if q in nogeo else rows).append((q, it, cat, tcls, is_settle, clean(lab[0], 60), clean(lab[1], 90), lab[2]))
+        (lost if q in nogeo else rows).append([q, it, cat, tcls, is_settle, clean(lab[0], 60), clean(lab[1], 90), lab[2]])
     rows.sort(key=lambda r: (r[1]["y"], -r[1]["sl"]))
     lost.sort(key=lambda r: (r[1]["y"], -r[1]["sl"]))
     print("events with labels", len(rows), "; without a usable point", len(lost), flush=True)
@@ -555,6 +605,10 @@ def main():
         for e in report[k]:
             e.append((labels.get(e[0]) or [""])[0])
     json.dump(report, open(os.path.join(WORK, "position_report.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=0)
+
+    sources, ext_stats = merge_external(rows)
+    rows.sort(key=lambda r: (r[1]["y"], -r[1]["sl"]))
+    print("after merging external sources:", len(rows), "events", flush=True)
 
     pidx = assign_places([r[1]["pt"] for r in rows], places)
     used = {}
@@ -570,9 +624,16 @@ def main():
             ptab.append([p[0], p[1], p[2], p[3], round(p[4], 3), round(p[5], 3)])
         pcol.append(used[i])
 
+    # records that only carry a generic name ("旱灾") get the modern place name in front
+    for r, pi in zip(rows, pcol):
+        if r[1].get("np") and pi >= 0:
+            r[5] = ptab[pi][0] + r[5]
+
     types, tix = [], {}
 
     def tlabel(c):
+        if c and c.startswith("="):
+            return c[1:]
         if not c or c not in classes:
             return ""
         info = classes[c]
@@ -601,11 +662,18 @@ def main():
         "q": [int(r[0][1:]) for r in rows],
         "w": [r[7] for r in rows],
         "t": tcol,
+        "src": [sources["index"].get(r[1].get("src", "wd"), 0) for r in rows],
+        "u": [r[1].get("u", "") for r in rows],
         "types": types,
         "places": ptab,
+        "sources": sources["list"],
     }
+    # text columns go to their own files so that no single file gets too large
     desc = {"d": data.pop("d")}
     json.dump(desc, open(os.path.join(OUT, "events_d.json"), "w", encoding="utf-8"), ensure_ascii=False, separators=(",", ":"))
+    json.dump({"n": data.pop("n"), "u": data.pop("u")}, open(os.path.join(OUT, "events_n.json"), "w", encoding="utf-8"),
+              ensure_ascii=False, separators=(",", ":"))
+    json.dump(ext_stats, open(os.path.join(WORK, "ext_stats.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     path = os.path.join(OUT, "events.json")
     json.dump(data, open(path, "w", encoding="utf-8"), ensure_ascii=False, separators=(",", ":"))
     print("wrote", path, os.path.getsize(path) // 1024, "KB;", len(rows), "events;", len(ptab), "places;", len(types), "types")

@@ -1,7 +1,8 @@
 """Build time-sliced settlement layer from Pleiades + CHGIS (+ Wikidata settlements if present).
 
 Output: web/data/settlements.json (columnar)
-  n name, x lon, y lat, a first year, b last year, s source (0 Pleiades, 1 CHGIS, 2 Wikidata),
+  n name, x lon, y lat, a first year, b last year,
+  s source (0 Pleiades, 1 CHGIS, 2 Wikidata, 3 al-Thurayya, 4 p3k14c, 5 AADR),
   t type label, d short note, id source id
 Years: negative = BCE.
 """
@@ -100,6 +101,11 @@ def main():
     if os.path.exists(wd):
         w = json.load(open(wd, encoding="utf-8"))
         print("wikidata settlements", len(w))
+        rows += [tuple(x) for x in w]
+    ex = os.path.join(ROOT, "data", "work", "ext_sites.json")
+    if os.path.exists(ex):  # al-Thurayya places, p3k14c radiocarbon sites, AADR ancient DNA localities (see external.py)
+        w = json.load(open(ex, encoding="utf-8"))
+        print("external sites", len(w))
         rows += [tuple(x) for x in w]
     rows.sort(key=lambda x: x[3])
     types = sorted({x[6] for x in rows})
