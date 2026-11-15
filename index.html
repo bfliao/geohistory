@@ -1,0 +1,549 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="地图加时间轴的世界历史事件浏览器：点击任意地点，查看该地周边各时期的事件、聚居地、迁徙路线和疆域。">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='7' fill='%230e5f70'/%3E%3Ccircle cx='8' cy='8' r='2.5' fill='%23f6f8f6'/%3E%3C/svg%3E">
+<style>:root{color-scheme:light;padding:env(safe-area-inset-top,0px) 0 env(safe-area-inset-bottom,0px)}body{margin:0;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>世界历史大事记</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Serif+SC:wght@600&display=swap">
+<style>
+/* Layout: full-bleed map; floating control column (left), place panel (right), timeline docked at bottom. */
+:root{
+  --sea:#c3d1d4; --land:#eaece7; --river:#a9bfc6; --border:#8d9a9c;
+  --ink:#16232b; --ink-2:#44545d; --ink-3:#76858c;
+  --panel:#f6f8f6; --panel-2:#e9eeec; --line:#cbd4d3; --accent:#0e5f70; --accent-ink:#ffffff;
+  --c0:#d55e00; --c1:#0072b2; --c2:#e69f00; --c3:#009e73; --c4:#56b4e9; --c5:#7d8a8f;
+  --route:#3d2b56; --settle:#2d3c44;
+  --f-title:"Noto Serif SC","Songti SC","STSong","SimSun",serif;
+  --f-body:"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK SC","WenQuanYi Zen Hei",system-ui,sans-serif;
+  --f-num:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --gl:max(16px, env(safe-area-inset-left, 0px)); --gr:max(16px, env(safe-area-inset-right, 0px));
+  --tl-h:118px;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --sea:#0d161c; --land:#1b272d; --river:#22363f; --border:#5c6b70;
+  --ink:#e7eded; --ink-2:#aebabd; --ink-3:#7f8e93;
+  --panel:#141e24; --panel-2:#1d2a31; --line:#2c3a41; --accent:#62c3d2; --accent-ink:#06181c;
+  --c0:#e8742a; --c1:#4a9ae8; --c2:#e69f00; --c3:#1fb88d; --c4:#7cc6f2; --c5:#8b979b;
+  --route:#c9b6ea; --settle:#c5d0d3; color-scheme:dark } }
+:root[data-theme="dark"]{
+  --sea:#0d161c; --land:#1b272d; --river:#22363f; --border:#5c6b70;
+  --ink:#e7eded; --ink-2:#aebabd; --ink-3:#7f8e93;
+  --panel:#141e24; --panel-2:#1d2a31; --line:#2c3a41; --accent:#62c3d2; --accent-ink:#06181c;
+  --c0:#e8742a; --c1:#4a9ae8; --c2:#e69f00; --c3:#1fb88d; --c4:#7cc6f2; --c5:#8b979b;
+  --route:#c9b6ea; --settle:#c5d0d3; color-scheme:dark }
+html,body{height:100%}
+body{background:var(--sea);color:var(--ink);font-family:var(--f-body);font-size:13px;line-height:1.5;overflow:hidden;position:relative}
+*{box-sizing:border-box}
+button,input,select{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+#app{position:relative;height:100%;width:100%;overflow:hidden}
+#map{position:absolute;inset:0 0 var(--tl-h) 0}
+.maplibregl-map{overflow:hidden;-webkit-tap-highlight-color:transparent}
+.maplibregl-canvas{position:absolute;left:0;top:0}
+.maplibregl-canvas-container.maplibregl-interactive{cursor:crosshair;user-select:none;-webkit-user-select:none}
+.maplibregl-canvas-container.maplibregl-touch-zoom-rotate.maplibregl-touch-drag-pan,.maplibregl-canvas-container.maplibregl-touch-zoom-rotate.maplibregl-touch-drag-pan .maplibregl-canvas{touch-action:none}
+.maplibregl-ctrl-top-left,.maplibregl-ctrl-top-right,.maplibregl-ctrl-bottom-left,.maplibregl-ctrl-bottom-right{position:absolute;pointer-events:none;z-index:2}
+.maplibregl-ctrl-top-left{top:0;left:0}
+
+.card{background:color-mix(in srgb,var(--panel) 94%,transparent);border:1px solid var(--line);border-radius:6px;backdrop-filter:blur(6px)}
+#side{position:absolute;top:12px;left:var(--gl);width:248px;max-height:calc(100% - var(--tl-h) - 24px);display:flex;flex-direction:column;z-index:5}
+#side header{padding:10px 12px 8px;border-bottom:1px solid var(--line);display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+#side h1{font-family:var(--f-title);font-size:19px;font-weight:600;margin:0;letter-spacing:.04em}
+#sideBody{overflow:auto;padding:10px 12px 12px;display:flex;flex-direction:column;gap:12px;min-height:0}
+#toggleSide{display:none;border:1px solid var(--line);background:var(--panel-2);border-radius:4px;padding:2px 8px;cursor:pointer}
+.lab{font-size:11px;color:var(--ink-3);letter-spacing:.08em;margin-bottom:4px}
+#search{width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:4px;background:var(--panel-2)}
+#results{display:flex;flex-direction:column;max-height:240px;overflow:auto;margin-top:4px}
+#results button{all:unset;cursor:pointer;padding:4px 6px;border-radius:4px;display:flex;gap:6px;align-items:baseline}
+#results button:hover,#results button:focus-visible{background:var(--panel-2)}
+.chips{display:flex;flex-direction:column;gap:2px}
+.chip{all:unset;cursor:pointer;display:flex;align-items:center;gap:8px;padding:3px 6px;border-radius:4px}
+.chip:hover{background:var(--panel-2)}
+.chip[aria-pressed="false"]{color:var(--ink-3)}
+.chip[aria-pressed="false"] .dot{background:transparent!important;box-shadow:inset 0 0 0 1.5px var(--ink-3)}
+.dot{width:10px;height:10px;border-radius:50%;flex:none;display:inline-block}
+.chip .cnt{margin-left:auto;font-family:var(--f-num);font-size:11px;color:var(--ink-3);font-variant-numeric:tabular-nums}
+.checks{display:flex;flex-direction:column;gap:3px}
+.checks label{display:flex;align-items:center;gap:8px;cursor:pointer}
+.checks small{color:var(--ink-3)}
+select{background:var(--panel-2);border:1px solid var(--line);border-radius:4px;padding:3px 6px}
+.row{display:flex;align-items:center;gap:8px;justify-content:space-between}
+#routeList{display:flex;flex-direction:column}
+#routeList button{all:unset;cursor:pointer;padding:3px 6px;border-radius:4px;display:flex;gap:8px;align-items:baseline}
+#routeList button:hover{background:var(--panel-2)}
+#routeList .yr,.yr{font-family:var(--f-num);font-size:11px;color:var(--ink-3);white-space:nowrap;font-variant-numeric:tabular-nums}
+.src{font-size:11px;color:var(--ink-3);line-height:1.45}
+.src a{color:inherit}
+
+#zoom{position:absolute;right:var(--gr);bottom:calc(var(--tl-h) + 12px);display:flex;flex-direction:column;z-index:4}
+#zoom button{all:unset;cursor:pointer;width:30px;height:30px;text-align:center;font-size:18px;line-height:30px}
+#zoom button+button{border-top:1px solid var(--line)}
+
+#panel{position:absolute;top:12px;right:var(--gr);width:340px;max-height:calc(100% - var(--tl-h) - 24px);display:flex;flex-direction:column;z-index:6}
+#panel header{padding:10px 12px;border-bottom:1px solid var(--line);display:flex;gap:8px;align-items:flex-start}
+#panel h2{font-family:var(--f-title);font-size:17px;margin:0;font-weight:600;line-height:1.3}
+#panel .sub{color:var(--ink-2);font-size:12px}
+#closePanel{all:unset;cursor:pointer;margin-left:auto;padding:0 6px;font-size:18px;color:var(--ink-3)}
+#panelMeta{padding:8px 12px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-2)}
+#panelBody{overflow:auto;padding:4px 0 10px;min-height:0}
+.sec{padding:8px 12px 2px;font-size:11px;color:var(--ink-3);letter-spacing:.08em;display:flex;justify-content:space-between}
+.ev{display:grid;grid-template-columns:74px 1fr;gap:2px 8px;padding:6px 12px;border-left:3px solid transparent;cursor:pointer}
+.ev:hover{background:var(--panel-2)}
+.ev.now{border-left-color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,transparent)}
+.ev .y{font-family:var(--f-num);font-size:12px;color:var(--ink-2);font-variant-numeric:tabular-nums;text-align:right;padding-top:1px}
+.ev .t{font-weight:600;min-width:0;overflow-wrap:anywhere}
+.ev .m{grid-column:2;color:var(--ink-2);font-size:12px;min-width:0;overflow-wrap:anywhere}
+.ev .m a{color:var(--accent);text-decoration:none;margin-right:8px}
+.ev .m a:hover{text-decoration:underline}
+.tag{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--ink-2);margin-right:6px}
+.tag .dot{width:7px;height:7px}
+.empty{padding:14px 12px;color:var(--ink-2)}
+.more{all:unset;cursor:pointer;margin:6px 12px;padding:4px 10px;border:1px solid var(--line);border-radius:4px;color:var(--ink-2)}
+
+#timeline{position:absolute;left:0;right:0;bottom:0;height:var(--tl-h);background:var(--panel);border-top:1px solid var(--line);z-index:7;display:flex;flex-direction:column;padding:6px var(--gr) 6px var(--gl)}
+#tlTop{display:flex;align-items:center;gap:10px;min-height:30px;flex-wrap:nowrap}
+#tlTop button{all:unset;cursor:pointer;border:1px solid var(--line);border-radius:4px;padding:1px 9px;background:var(--panel-2);white-space:nowrap}
+#tlTop button:hover{border-color:var(--ink-3)}
+#range{font-family:var(--f-num);font-size:15px;font-weight:500;font-variant-numeric:tabular-nums;white-space:nowrap}
+#stat{color:var(--ink-2);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1}
+#jump{width:92px;padding:2px 6px;border:1px solid var(--line);border-radius:4px;background:var(--panel-2)}
+#tlWrap{position:relative;flex:1;min-height:0}
+#tl{position:absolute;inset:0;width:100%;height:100%;cursor:ew-resize;touch-action:none;border-radius:3px}
+#loading{position:absolute;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;background:var(--sea)}
+#loading div{padding:14px 18px;font-family:var(--f-num)}
+.deck-tooltip{font-family:var(--f-body)!important;font-size:12px!important;max-width:280px;line-height:1.45}
+@media (max-width:760px){
+  :root{--tl-h:128px}
+  #side{width:auto;right:var(--gr);max-height:46%}
+  #toggleSide{display:block}
+  #side.closed #sideBody{display:none}
+  #panel{top:auto;left:var(--gl);right:var(--gr);width:auto;bottom:calc(var(--tl-h) + 8px);max-height:48%}
+  #zoom{display:none}
+  #tlTop{flex-wrap:wrap;gap:6px}
+  #jump{display:none}
+  #stat{flex-basis:100%}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<div id="app">
+  <div id="map" aria-label="世界历史地图"></div>
+
+  <aside id="side" class="card">
+    <header><h1>世界历史大事记</h1><button id="toggleSide" aria-expanded="true">图层</button></header>
+    <div id="sideBody">
+      <div>
+        <input id="search" type="search" placeholder="搜索事件或古今地名" aria-label="搜索事件或地名" autocomplete="off">
+        <div id="results"></div>
+      </div>
+      <div>
+        <div class="lab">事件类别（当前时段条数）</div>
+        <div class="chips" id="chips"></div>
+        <div class="row" style="margin-top:6px"><label for="imp">显示范围</label>
+          <select id="imp"><option value="0">全部事件</option><option value="5">较知名（≥5 个语言版本）</option><option value="20">知名（≥20 个语言版本）</option></select></div>
+      </div>
+      <div>
+        <div class="lab">图层</div>
+        <div class="checks" id="layers"></div>
+        <div class="src" id="polNote" style="margin-top:4px"></div>
+      </div>
+      <div id="routeBox" hidden>
+        <div class="lab">当前时段的迁徙与远征</div>
+        <div id="routeList"></div>
+      </div>
+      <div class="src">点击地图任意位置，查看该地周边在各个时期发生的事件。<br>
+        数据：<a href="https://www.wikidata.org" target="_blank" rel="noopener">Wikidata</a>（CC0）、<a href="https://pleiades.stoa.org" target="_blank" rel="noopener">Pleiades</a>（CC BY）、CHGIS V6（哈佛大学与复旦大学）、<a href="https://www.geonames.org" target="_blank" rel="noopener">GeoNames</a>（CC BY）、Natural Earth、<a href="https://github.com/aourednik/historical-basemaps" target="_blank" rel="noopener">historical-basemaps</a>（GPL-3.0）。迁徙路线为手工整理的近似示意；疆域为若干年份的近似快照。</div>
+    </div>
+  </aside>
+
+  <div id="zoom" class="card"><button id="zin" aria-label="放大">+</button><button id="zout" aria-label="缩小">−</button></div>
+
+  <section id="panel" class="card" hidden aria-live="polite">
+    <header><div><h2 id="pTitle"></h2><div class="sub" id="pSub"></div></div><button id="closePanel" aria-label="关闭">×</button></header>
+    <div id="panelMeta"></div>
+    <div id="panelBody"></div>
+  </section>
+
+  <div id="timeline">
+    <div id="tlTop">
+      <button id="play" aria-label="播放">▶ 播放</button>
+      <span id="range"></span>
+      <button id="wNarrow" aria-label="缩短时段">时段 −</button><button id="wWide" aria-label="加长时段">时段 +</button>
+      <input id="jump" placeholder="跳到年份 -221" aria-label="跳到年份，公元前用负数">
+      <span id="stat"></span>
+    </div>
+    <div id="tlWrap"><canvas id="tl" tabindex="0" role="slider" aria-label="时间轴"></canvas></div>
+  </div>
+  <div id="loading"><div class="card" id="loadMsg">正在载入数据…</div></div>
+</div>
+
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script src="https://unpkg.com/deck.gl@9.1.14/dist.min.js"></script>
+<script>
+(() => {
+'use strict';
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const CATS = ['战争与冲突','政治','灾害与事故','建城与建造','文化与科技','其他'];
+const KIND = {m:'迁徙', x:'远征与扩张', v:'航海探险', f:'强制迁移', c:'殖民与移民'};
+const SRC = ['Pleiades','CHGIS','Wikidata'];
+const POL_YEARS = [-123000,-10000,-8000,-5000,-4000,-3000,-2000,-1500,-1000,-700,-500,-400,-323,-300,-200,-100,-1,100,200,300,400,500,600,700,800,900,1000,1100,1200,1279,1300,1400,1492,1500,1530,1600,1650,1700,1715,1783,1800,1815,1878,1880,1900,1914,1920,1930,1938,1945,1960,1994,2000,2010];
+const POL_TINT = ['#c98f6b','#6f9fc4','#9bb86a','#b58bc2','#d0b45c','#6fb7a8','#c57f8f','#8c93cf'];
+
+/* ---------- time scale (non-linear: ancient compressed, modern stretched) ---------- */
+const TL = [[-10000,0],[-3000,.07],[-1000,.17],[0,.30],[1000,.46],[1500,.59],[1800,.74],[1900,.85],[2025,1]];
+const TMIN = TL[0][0], TMAX = TL[TL.length-1][0];
+function y2u(y){ if (y <= TMIN) return 0; if (y >= TMAX) return 1;
+  for (let i = 1; i < TL.length; i++) if (y <= TL[i][0]) { const [y0,u0] = TL[i-1], [y1,u1] = TL[i]; return u0 + (u1-u0)*(y-y0)/(y1-y0); } return 1; }
+function u2y(u){ if (u <= 0) return TMIN; if (u >= 1) return TMAX;
+  for (let i = 1; i < TL.length; i++) if (u <= TL[i][1]) { const [y0,u0] = TL[i-1], [y1,u1] = TL[i]; return y0 + (y1-y0)*(u-u0)/(u1-u0); } return TMAX; }
+const fy = y => { y = Math.round(y); if (y === 0) y = -1; return y < 0 ? '前' + (-y) : String(y); };
+const fyl = y => { y = Math.round(y); if (y === 0) y = -1; return y < 0 ? '公元前 ' + (-y) + ' 年' : y + ' 年'; };
+const fspan = (a, b) => (a === b || b == null) ? fy(a) : fy(a) + '–' + fy(b);
+
+/* ---------- state ---------- */
+const S = { uc: y2u(-215), uw: 0.012, cats: new Set([0,1,2,3,4,5]), imp: 0, playing: false, sel: null, radiusMode: 0,
+  layers: { events:true, context:true, settlements:true, routes:true, polities:true, borders:false, labels:true } };
+let E, ST, ROUTES = [], LAB, POLZH = {}, map, overlay, theme = {};
+let gridE, gridS, longEv = [], activeRoutes = [], labels = [], cityDots = [], polFeat = [], polYear = null, polCache = {};
+let tripT = 0, needLayers = true;
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+const win = () => { const ua = S.uc - S.uw/2, ub = S.uc + S.uw/2;
+  return { a: ua <= 0 ? -1e6 : Math.floor(u2y(ua)), b: ub >= 1 ? TMAX + 1 : Math.ceil(u2y(ub)) }; };
+
+/* ---------- theme ---------- */
+function hex(h){ h = h.trim(); if (h.length === 4) h = '#' + [...h.slice(1)].map(c => c + c).join(''); return [1,3,5].map(i => parseInt(h.slice(i, i+2), 16)); }
+function readTheme(){ const cs = getComputedStyle(document.documentElement), g = n => cs.getPropertyValue(n).trim();
+  theme = { sea:g('--sea'), land:g('--land'), river:g('--river'), border:g('--border'), ink:hex(g('--ink')), ink2:hex(g('--ink-2')), ink3:hex(g('--ink-3')),
+    landRgb:hex(g('--land')), accent:hex(g('--accent')), route:hex(g('--route')), settle:hex(g('--settle')), line:g('--line'), panel:g('--panel'), accentCss:g('--accent'),
+    cat:[0,1,2,3,4,5].map(i => hex(g('--c'+i))), catCss:[0,1,2,3,4,5].map(i => g('--c'+i)), dark: cs.colorScheme.includes('dark') || g('--land') === '#1b272d' }; }
+function applyTheme(){ readTheme(); if (!map || !map.getLayer('land')) return;
+  map.setPaintProperty('bg','background-color',theme.sea); map.setPaintProperty('land','fill-color',theme.land);
+  map.setPaintProperty('lakes','fill-color',theme.sea); map.setPaintProperty('rivers','line-color',theme.river);
+  map.setPaintProperty('borders','line-color',theme.border); map.setPaintProperty('pol-line','line-color',theme.dark ? '#93a3a8' : '#5d6c70');
+  map.setPaintProperty('pol-fill','fill-opacity',theme.dark ? .16 : .34);
+  colorVersion++; drawTL(); needLayers = true; }
+let colorVersion = 0;
+
+/* ---------- spatial grid ---------- */
+function buildGrid(lon, lat, n, cell){ const m = new Map();
+  for (let i = 0; i < n; i++){ const k = Math.floor((lon[i]+180)/cell)*4096 + Math.floor((lat[i]+90)/cell); let a = m.get(k); if (!a) m.set(k, a = []); a.push(i); }
+  return { m, cell, lon, lat }; }
+function hav(lo1, la1, lo2, la2){ const r = Math.PI/180, dla = (la2-la1)*r, dlo = (lo2-lo1)*r;
+  const a = Math.sin(dla/2)**2 + Math.cos(la1*r)*Math.cos(la2*r)*Math.sin(dlo/2)**2; return 12742*Math.asin(Math.sqrt(a)); }
+function near(g, lon, lat, km){ lon = ((lon+540)%360)-180; const dlat = km/111, dlon = km/(111*Math.max(.15, Math.cos(lat*Math.PI/180))), out = [];
+  const x0 = Math.floor((lon-dlon+180)/g.cell), x1 = Math.floor((lon+dlon+180)/g.cell), y0 = Math.floor((lat-dlat+90)/g.cell), y1 = Math.floor((lat+dlat+90)/g.cell), nx = Math.round(360/g.cell);
+  for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++){ const a = g.m.get((((x%nx)+nx)%nx)*4096 + y); if (!a) continue;
+    for (const i of a){ const d = hav(lon, lat, g.lon[i], g.lat[i]); if (d <= km) out.push([i, d]); } }
+  return out; }
+
+/* ---------- data load ---------- */
+async function getJSON(p, opt){ try { const r = await fetch(p); if (!r.ok) throw new Error(r.status); return await r.json(); } catch (e) { if (opt) return null; throw new Error('无法载入 ' + p); } }
+async function load(){
+  const msg = t => $('loadMsg').textContent = t;
+  msg('正在载入底图…');
+  const [land, lakes, rivers, borders, lab] = await Promise.all(['land','lakes','rivers','borders','labels'].map(n => getJSON('data/' + n + '.json')));
+  LAB = lab;
+  msg('正在载入历史事件…');
+  const [ev, evd, st, ro, pz] = await Promise.all([getJSON('data/events.json'), getJSON('data/events_d.json'), getJSON('data/settlements.json'), getJSON('data/routes.json'), getJSON('data/polity_zh.json', true)]);
+  ev.d = evd.d;
+  POLZH = pz || {};
+  const n = ev.n.length;
+  E = { n, name: ev.n, desc: ev.d, y: Int32Array.from(ev.y), e: new Int32Array(n), md: ev.md, lon: Float32Array.from(ev.x), lat: Float32Array.from(ev.la),
+        c: Uint8Array.from(ev.c), s: Uint16Array.from(ev.s), p: ev.p, q: ev.q, w: ev.w, t: ev.t, types: ev.types, places: ev.places, r: new Float32Array(n) };
+  for (let i = 0; i < n; i++){ E.e[i] = ev.e[i] ? ev.e[i] : E.y[i]; E.r[i] = E.c[i] === 3 ? 1.8 + .3*Math.sqrt(Math.min(E.s[i], 130)) : 2.2 + 1.05*Math.sqrt(Math.min(E.s[i], 130)); if (E.e[i] > E.y[i] + 1) longEv.push(i); }
+  const m = st.n.length;
+  ST = { n: m, name: st.n, lon: Float32Array.from(st.x), lat: Float32Array.from(st.y), a: Int32Array.from(st.a), b: Int32Array.from(st.b), s: st.s, t: st.t, d: st.d, id: st.id, types: st.types };
+  gridE = buildGrid(E.lon, E.lat, n, .5); gridS = buildGrid(ST.lon, ST.lat, m, .5);
+  ROUTES = ro.map(prepRoute);
+  msg('正在绘制地图…');
+  initMap({land, lakes, rivers, borders});
+}
+
+/* ---------- routes: Catmull-Rom smoothing + timestamps ---------- */
+function prepRoute(r, id){ const p = r.p, pts = [];
+  const P = i => p[Math.max(0, Math.min(p.length-1, i))];
+  for (let i = 0; i < p.length-1; i++){ const p0 = P(i-1), p1 = P(i), p2 = P(i+1), p3 = P(i+2);
+    for (let k = 0; k < 12; k++){ const t = k/12, t2 = t*t, t3 = t2*t;
+      pts.push([0,1].map(d => .5*((2*p1[d]) + (-p0[d]+p2[d])*t + (2*p0[d]-5*p1[d]+4*p2[d]-p3[d])*t2 + (-p0[d]+3*p1[d]-3*p2[d]+p3[d])*t3))); } }
+  pts.push(p[p.length-1].slice());
+  let L = 0; const ts = [0]; for (let i = 1; i < pts.length; i++){ L += Math.hypot(pts[i][0]-pts[i-1][0], pts[i][1]-pts[i-1][1]); ts.push(L); }
+  return Object.assign({}, r, { id, path: pts, ts: ts.map(v => v/L*1000) }); }
+
+/* ---------- map ---------- */
+function initMap(g){
+  readTheme();
+  map = new maplibregl.Map({ container:'map', center:[78,33], zoom: innerWidth < 760 ? 1.4 : 2.4, minZoom:.8, maxZoom:11, attributionControl:false, dragRotate:false, pitchWithRotate:false, touchPitch:false,
+    style:{ version:8, sources:{
+        land:{type:'geojson',data:g.land,tolerance:.25}, lakes:{type:'geojson',data:g.lakes}, rivers:{type:'geojson',data:g.rivers}, borders:{type:'geojson',data:g.borders},
+        pol:{type:'geojson',data:{type:'FeatureCollection',features:[]}} },
+      layers:[ {id:'bg',type:'background',paint:{'background-color':theme.sea}},
+        {id:'land',type:'fill',source:'land',paint:{'fill-color':theme.land,'fill-antialias':false}},
+        {id:'pol-fill',type:'fill',source:'pol',paint:{'fill-color':['to-color',['get','col']],'fill-opacity':theme.dark ? .16 : .34,'fill-antialias':false}},
+        {id:'lakes',type:'fill',source:'lakes',paint:{'fill-color':theme.sea}},
+        {id:'rivers',type:'line',source:'rivers',paint:{'line-color':theme.river,'line-width':['interpolate',['linear'],['zoom'],2,.4,8,1.6]}},
+        {id:'pol-line',type:'line',source:'pol',paint:{'line-color':theme.dark ? '#93a3a8' : '#5d6c70','line-width':.7,'line-opacity':.7}},
+        {id:'borders',type:'line',source:'borders',layout:{visibility:'none'},paint:{'line-color':theme.border,'line-width':.8,'line-dasharray':[3,2]}} ] } });
+  map.touchZoomRotate.disableRotation(); map.keyboard.disableRotation();
+  overlay = new deck.MapboxOverlay({ interleaved:false, layers:[], pickingRadius:4, getTooltip: tip });
+  map.addControl(overlay);
+  map.on('load', () => { $('loading').hidden = true; initUI(); onWindow(); frame(); });
+  map.on('move', () => { labelsDirty = true; });
+  map.on('click', e => { const hit = overlay.pickObject({ x:e.point.x, y:e.point.y, radius:5, layerIds:['routes'] });
+    if (hit && hit.object) showRoute(hit.object); else selectAt(e.lngLat.lng, e.lngLat.lat); });
+  window.__atlas = { map, S, get E(){ return E; }, selectAt, setYear };
+}
+
+function tip(info){ if (!info.layer || info.index < 0) return null; const id = info.layer.id, i = info.index; let h = '';
+  if (id === 'events') h = `<b>${esc(E.name[i])}</b><br>${fspan(E.y[i], E.e[i])} · ${esc(E.types[E.t[i]] || CATS[E.c[i]])}${E.p[i] >= 0 ? '<br>' + esc(placeStr(E.p[i])) : ''}`;
+  else if (id === 'settlements') h = `<b>${esc(ST.name[i])}</b><br>${esc(ST.types[ST.t[i]])} · 存续 ${fspan(ST.a[i], ST.b[i])}<br><span style="opacity:.7">${SRC[ST.s[i]]}</span>`;
+  else if (id === 'routes' && info.object) h = `<b>${esc(info.object.n)}</b><br>${KIND[info.object.k]} · ${fspan(info.object.a, info.object.b)}`;
+  else return null;
+  return { html:h, style:{ background:theme.panel, color:`rgb(${theme.ink})`, border:'1px solid ' + theme.line, borderRadius:'4px', padding:'6px 8px' } }; }
+const placeStr = p => { const a = E.places[p]; return [a[0], a[1], a[2], a[3]].filter((v, i, arr) => v && arr.indexOf(v) === i).join(' · '); };
+
+/* ---------- labels (greedy declutter in screen space) ---------- */
+let labelsDirty = true, lastLabelT = 0;
+function proj(lon, lat){ const W = map.getContainer().clientWidth, H = map.getContainer().clientHeight;
+  for (const d of [0, 360, -360]){ const p = map.project([lon + d, lat]); if (p.x > -20 && p.x < W + 20 && p.y > -10 && p.y < H + 10) return [p.x, p.y, lon + d]; } return null; }
+function buildLabels(){
+  const out = [], boxes = [], z = map.getZoom(), { a, b } = win();
+  const tw = (t, sz) => { let w = 0; for (const ch of t) w += ch.charCodeAt(0) > 0x2e80 ? sz : sz*.56; return w; };
+  const tryAdd = (text, lon, lat, sz, color, anchor, dx, bold) => { const p = proj(lon, lat); if (!p) return false;
+    const w = tw(text, sz) + 10, h = sz + 8, x0 = anchor === 'middle' ? p[0] - w/2 : p[0] + dx, y0 = p[1] - h/2;
+    for (const q of boxes) if (x0 < q[2] && x0 + w > q[0] && y0 < q[3] && y0 + h > q[1]) return false;
+    boxes.push([x0, y0, x0 + w, y0 + h]); out.push({ text, pos:[p[2], lat], sz, color, anchor, dx, bold }); return true; };
+  cityDots = [];
+  if (S.layers.events){ // top events in window + viewport
+    const cand = []; let i = lowerBound(E.y, a); const end = lowerBound(E.y, b + 1);
+    const ok = j => S.cats.has(E.c[j]) && E.s[j] >= Math.max(S.imp, 3);
+    for (; i < end; i++) if (ok(i)) cand.push(i);
+    for (const j of longEv) if (E.y[j] < a && E.e[j] >= a && ok(j)) cand.push(j);
+    const score = j => E.s[j]*(E.c[j] === 3 ? .25 : 1); cand.sort((p, q) => score(q) - score(p));
+    let nAdd = 0; for (const j of cand){ if (nAdd >= 36) break; const t = E.name[j]; if (tryAdd(t.length > 16 ? t.slice(0, 15) + '…' : t, E.lon[j], E.lat[j], 12.5, theme.ink, 'start', E.r[j] + 4, true)) nAdd++; } }
+  if (S.layers.polities) for (const f of polFeat){ const px = f.span * 256 * Math.pow(2, z) / 360; if (px < 60) continue; tryAdd(f.name, f.c[0], f.c[1], px > 300 ? 15 : 12, theme.ink2, 'middle', 0, false); }
+  if (S.layers.labels){
+    if (z < 4.2 && !S.layers.polities) for (const c of LAB.countries) if (c[3] <= z + 1.2) tryAdd(c[0], c[1], c[2], 12, theme.ink3, 'middle', 0, false);
+    const maxRank = z < 3 ? 0 : z < 4 ? 1 : z < 5 ? 3 : z < 6 ? 5 : z < 7 ? 7 : 10; let nC = 0;
+    for (const c of LAB.cities){ if (c[3] > maxRank) break; if (nC > 140) break; if (tryAdd(c[0], c[1], c[2], 11, theme.ink3, 'start', 5, false)){ nC++; cityDots.push(out[out.length-1].pos); } } }
+  labels = out; needLayers = true; }
+function lowerBound(arr, v){ let lo = 0, hi = arr.length; while (lo < hi){ const m = (lo + hi) >> 1; if (arr[m] < v) lo = m + 1; else hi = m; } return lo; }
+
+/* ---------- deck layers ---------- */
+const FONT = '"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK SC","WenQuanYi Zen Hei",sans-serif';
+function buildLayers(){
+  const { a, b } = win(), z = map.getZoom(), L = [], D = deck, cats = [...S.cats], rs = Math.max(.7, Math.min(1.35, .55 + z*.09));
+  const posE = (_, { index, target }) => { target[0] = E.lon[index]; target[1] = E.lat[index]; target[2] = 0; return target; };
+  if (S.layers.settlements) L.push(new D.ScatterplotLayer({ id:'settlements', data:{ length: ST.n }, pickable:true,
+    getPosition:(_, { index, target }) => { target[0] = ST.lon[index]; target[1] = ST.lat[index]; target[2] = 0; return target; },
+    radiusUnits:'pixels', getRadius: z < 4 ? 1.3 : z < 6 ? 2 : 3, stroked:true, filled:true, lineWidthUnits:'pixels', getLineWidth: z < 4 ? 0 : 1,
+    getFillColor:[...theme.settle, z < 4 ? 120 : 40], getLineColor:[...theme.settle, 200],
+    extensions:[new D.DataFilterExtension({ filterSize:2 })], getFilterValue:(_, { index, target }) => { target[0] = ST.a[index]; target[1] = ST.b[index]; return target; },
+    filterRange:[[-2e6, b], [a, 2e6]], updateTriggers:{ getFillColor:[colorVersion, z < 4], getLineColor:colorVersion, getRadius:[z < 4, z < 6], getLineWidth:z < 4 } }));
+  if (S.layers.events && S.layers.context) L.push(new D.ScatterplotLayer({ id:'context', data:{ length: E.n }, getPosition:posE, radiusUnits:'pixels', getRadius:1.2,
+    getFillColor:[...theme.ink3, theme.dark ? 70 : 85], extensions:[new D.DataFilterExtension({ filterSize:1, categorySize:1 })],
+    getFilterValue:(_, { index }) => E.s[index], filterRange:[S.imp, 1e6], getFilterCategory:(_, { index }) => E.c[index], filterCategories:cats, updateTriggers:{ getFillColor:colorVersion } }));
+  if (S.layers.routes && activeRoutes.length){
+    L.push(new D.PathLayer({ id:'routes', data:activeRoutes, pickable:true, getPath:d => d.path, getColor:[...theme.route, 110], widthUnits:'pixels', getWidth:d => 1 + d.w*.9, capRounded:true, jointRounded:true, updateTriggers:{ getColor:colorVersion } }));
+    if (!reduceMotion) L.push(new D.TripsLayer({ id:'trips', data:activeRoutes, getPath:d => d.path, getTimestamps:d => d.ts, getColor:theme.route, widthUnits:'pixels', getWidth:d => 2.5 + d.w*1.2, capRounded:true, jointRounded:true, fadeTrail:true, trailLength:260, currentTime:tripT, updateTriggers:{ getColor:colorVersion } })); }
+  if (S.layers.events) L.push(new D.ScatterplotLayer({ id:'events', data:{ length: E.n }, pickable:true, getPosition:posE, radiusUnits:'pixels', radiusScale:rs, getRadius:(_, { index }) => E.r[index], radiusMinPixels:2,
+    getFillColor:(_, { index, target }) => { const c = theme.cat[E.c[index]]; target[0] = c[0]; target[1] = c[1]; target[2] = c[2]; target[3] = 225; return target; },
+    stroked:true, lineWidthUnits:'pixels', getLineWidth:1, getLineColor:[...theme.landRgb, 255],
+    extensions:[new D.DataFilterExtension({ filterSize:3, categorySize:1 })],
+    getFilterValue:(_, { index, target }) => { target[0] = E.y[index]; target[1] = E.e[index]; target[2] = E.s[index]; return target; },
+    filterRange:[[-2e6, b], [a, 2e6], [S.imp, 1e6]], getFilterCategory:(_, { index }) => E.c[index], filterCategories:cats, updateTriggers:{ getFillColor:colorVersion, getLineColor:colorVersion } }));
+  if (S.sel) L.push(new D.ScatterplotLayer({ id:'sel', data:[S.sel], getPosition:d => [d.lon, d.lat], radiusUnits:'meters', getRadius:d => d.km*1000, filled:true, stroked:true,
+    getFillColor:[...theme.accent, 22], getLineColor:[...theme.accent, 255], lineWidthUnits:'pixels', getLineWidth:2, updateTriggers:{ getRadius:S.sel.km, getFillColor:colorVersion, getLineColor:colorVersion } }));
+  if (cityDots.length) L.push(new D.ScatterplotLayer({ id:'cityDots', data:cityDots, getPosition:d => d, radiusUnits:'pixels', getRadius:1.8, filled:false, stroked:true, lineWidthUnits:'pixels', getLineWidth:1, getLineColor:[...theme.ink3, 220], updateTriggers:{ getLineColor:colorVersion } }));
+  if (labels.length) L.push(new D.TextLayer({ id:'labels', data:labels, getPosition:d => d.pos, getText:d => d.text, getSize:d => d.sz, getColor:d => d.color, sizeUnits:'pixels',
+    getTextAnchor:d => d.anchor, getAlignmentBaseline:'center', getPixelOffset:d => [d.dx, 0], fontFamily:FONT, fontWeight:500, characterSet:'auto',
+    fontSettings:{ sdf:true, fontSize:44, buffer:8, radius:12 }, outlineWidth:3.2, outlineColor:[...theme.landRgb, 235] }));
+  return L; }
+
+/* ---------- polities (snapshot nearest before window centre) ---------- */
+function hash(s){ let h = 0; for (let i = 0; i < s.length; i++) h = (h*31 + s.charCodeAt(i)) | 0; return Math.abs(h); }
+async function updatePolity(){
+  const y = u2y(S.uc); let pick = null, bd = 1e9; for (const py of POL_YEARS){ const d = Math.abs(py - y); if (d < bd){ bd = d; pick = py; } }
+  if (!S.layers.polities) pick = null;
+  if (pick === polYear) return; polYear = pick;
+  const note = $('polNote');
+  if (pick == null){ map.getSource('pol').setData({ type:'FeatureCollection', features:[] }); polFeat = []; note.textContent = ''; labelsDirty = true; return; }
+  let d = polCache[pick]; if (!d){ d = polCache[pick] = await getJSON('data/polities/' + pick + '.json', true) || { type:'FeatureCollection', features:[] };
+    d.features = d.features.filter(f => f.geometry && f.properties && f.properties.NAME);
+    for (const f of d.features){ const nm = f.properties.NAME; f.properties.col = POL_TINT[hash(nm) % POL_TINT.length]; f.properties.zh = POLZH[nm] || nm; } }
+  if (polYear !== pick) return;
+  map.getSource('pol').setData(d);
+  polFeat = []; const seen = new Map();
+  for (const f of d.features){ if (!f.geometry) continue; const polys = f.geometry.type === 'Polygon' ? [f.geometry.coordinates] : f.geometry.coordinates; let best = null, bestA = 0;
+    for (const pg of polys){ let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9; for (const p of pg[0]){ if (p[0] < x0) x0 = p[0]; if (p[0] > x1) x1 = p[0]; if (p[1] < y0) y0 = p[1]; if (p[1] > y1) y1 = p[1]; }
+      const A = (x1-x0)*(y1-y0); if (A > bestA){ bestA = A; let sx = 0, sy = 0; for (const p of pg[0]){ sx += p[0]; sy += p[1]; } best = { name:f.properties.zh, c:[sx/pg[0].length, sy/pg[0].length], span:Math.min(x1-x0, (y1-y0)*1.6) }; } }
+    if (best){ const prev = seen.get(best.name); if (!prev || prev.span < best.span) seen.set(best.name, best); } }
+  polFeat = [...seen.values()].sort((p, q) => q.span - p.span);
+  note.textContent = '疆域为 ' + fyl(pick) + '前后的近似快照，仅供参考。'; labelsDirty = true; }
+
+/* ---------- window change ---------- */
+function onWindow(){
+  const { a, b } = win();
+  $('range').textContent = (a < -9e5 ? '公元前 10000 年以前' : fyl(a)) + ' – ' + fyl(Math.min(b, TMAX));
+  const lo = lowerBound(E.y, a), hi = lowerBound(E.y, b + 1), cnt = [0,0,0,0,0,0];
+  for (let i = lo; i < hi; i++) if (E.s[i] >= S.imp) cnt[E.c[i]]++;
+  for (const j of longEv) if (E.y[j] < a && E.e[j] >= a && E.s[j] >= S.imp) cnt[E.c[j]]++;
+  document.querySelectorAll('#chips .cnt').forEach((el, i) => el.textContent = cnt[i].toLocaleString('en'));
+  let total = 0; for (const c of S.cats) total += cnt[c];
+  let ns = 0; for (let i = 0; i < ST.n; i++) if (ST.a[i] <= b && ST.b[i] >= a) ns++;
+  activeRoutes = ROUTES.filter(r => r.a <= b && Math.max(r.b, TMIN) >= (a < -9e5 ? -1e9 : a));
+  $('stat').textContent = `${total.toLocaleString('en')} 件事件 · ${ns.toLocaleString('en')} 处聚居地 · ${activeRoutes.length} 条迁徙与远征路线`;
+  const rl = $('routeList'); rl.innerHTML = ''; $('routeBox').hidden = !activeRoutes.length || !S.layers.routes;
+  for (const r of activeRoutes){ const bt = document.createElement('button'); bt.innerHTML = `<span>${esc(r.n)}</span><span class="yr" style="margin-left:auto">${fspan(r.a, r.b)}</span>`; bt.onclick = () => showRoute(r, true); rl.appendChild(bt); }
+  $('tl').setAttribute('aria-valuetext', $('range').textContent);
+  updatePolity(); drawTL(); labelsDirty = true; needLayers = true;
+  if (S.sel) markNow();
+}
+function setYear(y, keepWidth){ S.uc = y2u(y); if (!keepWidth) S.uw = Math.max(S.uw, 0.004); clampWin(); onWindow(); }
+function clampWin(){ S.uw = Math.max(0.0015, Math.min(1, S.uw)); S.uc = Math.max(0, Math.min(1, S.uc)); }
+
+/* ---------- timeline canvas ---------- */
+let hist = null, histW = 0;
+function drawTL(){
+  const cv = $('tl'), wrap = cv.parentElement, W = wrap.clientWidth, H = wrap.clientHeight, dpr = Math.min(2, devicePixelRatio || 1);
+  if (!W || !E) return;
+  if (cv.width !== W*dpr || cv.height !== H*dpr){ cv.width = W*dpr; cv.height = H*dpr; }
+  const g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, W, H);
+  const cs = getComputedStyle(document.documentElement), col = n => cs.getPropertyValue(n).trim();
+  if (!hist || histW !== W){ hist = new Float32Array(W); histW = W; for (let i = 0; i < E.n; i++){ const x = Math.min(W-1, Math.floor(y2u(E.y[i])*W)); hist[x]++; } }
+  const axisH = 18, plotH = H - axisH; let mx = 1; for (let i = 0; i < W; i++) if (hist[i] > mx) mx = hist[i];
+  g.fillStyle = col('--panel-2'); g.fillRect(0, 0, W, plotH);
+  g.fillStyle = col('--ink-3'); g.globalAlpha = .55;
+  for (let i = 0; i < W; i++) if (hist[i]){ const h = Math.max(1, Math.log1p(hist[i])/Math.log1p(mx)*(plotH-6)); g.fillRect(i, plotH - h, 1, h); }
+  g.globalAlpha = 1; g.font = '11px ' + col('--f-num'); g.textBaseline = 'top'; g.fillStyle = col('--ink-2'); g.strokeStyle = col('--line');
+  const ticks = W < 560 ? [-3000,-1000,0,1000,1500,1800,1900,2000] : [-8000,-5000,-3000,-2000,-1000,-500,0,500,1000,1250,1500,1650,1800,1850,1900,1950,2000]; let lastX = -99;
+  for (const t of ticks){ const x = Math.round(y2u(t)*W) + .5; g.beginPath(); g.moveTo(x, 0); g.lineTo(x, plotH + 3); g.stroke();
+    const s = t === 0 ? '公元元年' : t < 0 ? '前' + (-t) : String(t), w = g.measureText(s).width; let tx = Math.min(W - w - 1, Math.max(1, x - w/2)); if (tx > lastX + 6){ g.fillText(s, tx, plotH + 5); lastX = tx + w; } }
+  const xa = (S.uc - S.uw/2)*W, xb = (S.uc + S.uw/2)*W, ww = Math.max(3, xb - xa);
+  g.fillStyle = col('--accent'); g.globalAlpha = .22; g.fillRect(xa, 0, ww, plotH); g.globalAlpha = 1;
+  g.fillRect(xa - 1, 0, 2, plotH); g.fillRect(xa + ww - 1, 0, 2, plotH); g.fillRect(xa - 3, plotH/2 - 9, 6, 18); g.fillRect(xa + ww - 3, plotH/2 - 9, 6, 18);
+}
+function initTimeline(){
+  const cv = $('tl'); let mode = null, startU = 0, startC = 0, startW = 0;
+  const uAt = e => { const r = cv.getBoundingClientRect(); return (e.clientX - r.left)/r.width; };
+  cv.addEventListener('pointerdown', e => { cv.setPointerCapture(e.pointerId); const u = uAt(e), W = cv.getBoundingClientRect().width, ua = S.uc - S.uw/2, ub = S.uc + S.uw/2, tol = 9/W;
+    if (Math.abs(u - ua) < tol && S.uw*W > 14) mode = 'l'; else if (Math.abs(u - ub) < tol && S.uw*W > 14) mode = 'r'; else { mode = 'm'; if (u < ua || u > ub){ S.uc = u; clampWin(); onWindow(); } }
+    startU = u; startC = S.uc; startW = S.uw; stopPlay(); });
+  cv.addEventListener('pointermove', e => { if (!mode) return; const u = uAt(e), d = u - startU;
+    if (mode === 'm') S.uc = startC + d; else { const ua = startC - startW/2 + (mode === 'l' ? d : 0), ub = startC + startW/2 + (mode === 'r' ? d : 0); if (ub - ua < 0.0015) return; S.uc = (ua + ub)/2; S.uw = ub - ua; }
+    clampWin(); onWindow(); });
+  const up = () => { mode = null; }; cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
+  cv.addEventListener('wheel', e => { e.preventDefault(); S.uw *= e.deltaY > 0 ? 1.15 : 1/1.15; clampWin(); onWindow(); }, { passive:false });
+  cv.addEventListener('keydown', e => { const k = e.key; if (k === 'ArrowLeft' || k === 'ArrowRight'){ S.uc += (k === 'ArrowLeft' ? -1 : 1)*S.uw*(e.shiftKey ? 1 : .25); clampWin(); onWindow(); e.preventDefault(); } });
+  new ResizeObserver(() => { hist = null; drawTL(); }).observe(cv.parentElement);
+}
+function stopPlay(){ if (S.playing){ S.playing = false; $('play').textContent = '▶ 播放'; } }
+
+/* ---------- place panel ---------- */
+const RADII = [0, 10, 25, 50, 100, 200];
+function autoKm(lat){ const mpp = 156543.03*Math.cos(lat*Math.PI/180)/Math.pow(2, map.getZoom() + 1); return Math.max(8, Math.min(250, Math.round(mpp*26/1000))); }
+function selectAt(lon, lat){ lon = ((lon + 540) % 360) - 180; const km = RADII[S.radiusMode] || autoKm(lat); S.sel = { lon, lat, km }; S.route = null; renderPanel(); needLayers = true; }
+let panelRows = [], shown = 0;
+function renderPanel(){
+  const { lon, lat, km } = S.sel, ev = near(gridE, lon, lat, km), st = near(gridS, lon, lat, km);
+  ev.sort((p, q) => E.y[p[0]] - E.y[q[0]] || E.s[q[0]] - E.s[p[0]]);
+  // nearest known modern place: closest event's place within radius, weighted by distance
+  let pl = -1, best = 1e9; for (const [i, d] of ev) if (E.p[i] >= 0){ const P = E.places[E.p[i]], dd = hav(lon, lat, P[4], P[5]); if (dd < best){ best = dd; pl = E.p[i]; } }
+  const P = pl >= 0 ? E.places[pl] : null;
+  $('pTitle').textContent = P ? P[0] : (st.length ? ST.name[st.sort((p, q) => p[1] - q[1])[0][0]] + ' 一带' : '所选地点');
+  $('pSub').textContent = (P ? [P[1], P[2], P[3]].filter((v, i, a) => v && v !== P[0] && a.indexOf(v) === i).join(' · ') + ' · ' : '') + `${Math.abs(lat).toFixed(2)}°${lat >= 0 ? 'N' : 'S'} ${Math.abs(lon).toFixed(2)}°${lon >= 0 ? 'E' : 'W'}`;
+  let pol = ''; if (S.layers.polities && polYear != null){ const f = map.queryRenderedFeatures(map.project([lon, lat]), { layers:['pol-fill'] })[0]; if (f) pol = `${fyl(polYear)}前后属 <b>${esc(f.properties.zh)}</b>`; }
+  $('panelMeta').innerHTML = `<div class="row"><span>半径 ${km} km 内：${ev.length} 件事件，${st.length} 处历史聚居地</span>
+    <select id="rad" aria-label="查询半径">${RADII.map((r, i) => `<option value="${i}"${i === S.radiusMode ? ' selected' : ''}>${r ? r + ' km' : '自动'}</option>`).join('')}</select></div>${pol ? '<div>' + pol + '</div>' : ''}`;
+  $('rad').onchange = e => { S.radiusMode = +e.target.value; selectAt(lon, lat); };
+  panelRows = ev.map(x => x[0]); shown = 0;
+  const body = $('panelBody'); body.innerHTML = '';
+  if (!ev.length && !st.length){ body.innerHTML = '<div class="empty">这个范围内没有记录。可以放大查询半径，或点击地图上有灰点的位置。</div>'; }
+  if (ev.length){ const h = document.createElement('div'); h.className = 'sec'; h.innerHTML = '<span>事件（按年代）</span><span>高亮为当前时段</span>'; body.appendChild(h);
+    const list = document.createElement('div'); list.id = 'evList'; body.appendChild(list); const more = document.createElement('button'); more.className = 'more'; more.id = 'more'; body.appendChild(more); more.onclick = () => addRows(200); addRows(150); }
+  if (st.length){ st.sort((p, q) => ST.a[p[0]] - ST.a[q[0]]); const h = document.createElement('div'); h.className = 'sec'; h.innerHTML = '<span>历史聚居地与治所</span><span>存续年代</span>'; body.appendChild(h);
+    const { a, b } = win(); const fr = document.createDocumentFragment();
+    for (const [i] of st.slice(0, 200)){ const d = document.createElement('div'); d.className = 'ev' + (ST.a[i] <= b && ST.b[i] >= a ? ' now' : ''); d.dataset.s = i;
+      const link = ST.s[i] === 0 ? `<a href="https://pleiades.stoa.org/places/${esc(ST.id[i])}" target="_blank" rel="noopener">Pleiades</a>` : ST.s[i] === 2 ? `<a href="https://www.wikidata.org/wiki/${esc(ST.id[i])}" target="_blank" rel="noopener">Wikidata</a>` : '<span style="color:var(--ink-3)">CHGIS</span>';
+      d.innerHTML = `<div class="y">${fspan(ST.a[i], ST.b[i])}</div><div class="t">${esc(ST.name[i])} <span class="tag">${esc(ST.types[ST.t[i]])}</span></div><div class="m">${esc(ST.d[i])} ${link}</div>`;
+      d.onclick = e => { if (e.target.tagName !== 'A') setYear(Math.max(ST.a[i], TMIN) + 1, true); }; fr.appendChild(d); }
+    body.appendChild(fr); if (st.length > 200){ const m = document.createElement('div'); m.className = 'empty'; m.textContent = `另有 ${st.length - 200} 处未列出，缩小半径可查看。`; body.appendChild(m); } }
+  $('panel').hidden = false; body.scrollTop = 0; scrollToNow();
+}
+function addRows(k){ const list = $('evList'), { a, b } = win(), fr = document.createDocumentFragment(), end = Math.min(panelRows.length, shown + k);
+  for (; shown < end; shown++){ const i = panelRows[shown], d = document.createElement('div'); d.className = 'ev' + (E.y[i] <= b && E.e[i] >= a ? ' now' : ''); d.dataset.i = i;
+    const md = E.md[i] ? ` ${Math.floor(E.md[i]/100)}月${E.md[i]%100}日` : '';
+    const wiki = E.w[i] ? `<a href="https://www.wikidata.org/wiki/Special:GoToLinkedPage/${E.w[i] === 1 ? 'zhwiki' : 'enwiki'}/Q${E.q[i]}" target="_blank" rel="noopener">维基百科${E.w[i] === 2 ? '（英文）' : ''}</a>` : '';
+    d.innerHTML = `<div class="y">${fspan(E.y[i], E.e[i])}</div><div class="t">${esc(E.name[i])}</div>
+      <div class="m"><span class="tag"><span class="dot" style="background:var(--c${E.c[i]})"></span>${esc(E.types[E.t[i]] || CATS[E.c[i]])}${md}</span>${E.p[i] >= 0 ? esc(E.places[E.p[i]][0]) : ''}</div>
+      ${E.desc[i] ? `<div class="m">${esc(E.desc[i])}</div>` : ''}<div class="m">${wiki}<a href="https://www.wikidata.org/wiki/Q${E.q[i]}" target="_blank" rel="noopener">Wikidata</a></div>`;
+    d.onclick = e => { if (e.target.tagName !== 'A') setYear(E.y[i], true); }; fr.appendChild(d); }
+  list.appendChild(fr); const more = $('more'); more.hidden = shown >= panelRows.length; more.textContent = `再显示 ${Math.min(200, panelRows.length - shown)} 条（共 ${panelRows.length} 条）`; }
+function markNow(){ const { a, b } = win(); document.querySelectorAll('#panelBody .ev').forEach(d => { if (d.dataset.i != null){ const i = +d.dataset.i; d.classList.toggle('now', E.y[i] <= b && E.e[i] >= a); } else if (d.dataset.s != null){ const i = +d.dataset.s; d.classList.toggle('now', ST.a[i] <= b && ST.b[i] >= a); } }); }
+function scrollToNow(){ const el = document.querySelector('#panelBody .ev.now'); if (el) $('panelBody').scrollTop = Math.max(0, el.offsetTop - 60); }
+function showRoute(r, fly){ S.sel = null; needLayers = true;
+  $('pTitle').textContent = r.n; $('pSub').textContent = `${KIND[r.k]} · ${fspan(r.a, r.b)}`;
+  $('panelMeta').innerHTML = '<div>路线为手工整理的近似示意，途经点和年代仅供参考。</div>'; $('panelBody').innerHTML = `<div class="empty" style="color:var(--ink)">${esc(r.d)}</div>`; $('panel').hidden = false;
+  if (fly){ let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9; for (const p of r.path){ x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]); }
+    map.fitBounds([[x0, Math.max(-80, y0)], [x1, Math.min(84, y1)]], { padding:{ top:60, bottom:60, left: innerWidth > 760 ? 290 : 30, right: innerWidth > 760 ? 370 : 30 }, maxZoom:6, duration: reduceMotion ? 0 : 900 }); } }
+
+/* ---------- UI wiring ---------- */
+function initUI(){
+  const chips = $('chips'); CATS.forEach((c, i) => { const b = document.createElement('button'); b.className = 'chip'; b.setAttribute('aria-pressed', 'true');
+    b.innerHTML = `<span class="dot" style="background:var(--c${i})"></span><span>${c}</span><span class="cnt"></span>`;
+    b.onclick = () => { S.cats.has(i) ? S.cats.delete(i) : S.cats.add(i); b.setAttribute('aria-pressed', S.cats.has(i)); onWindow(); }; chips.appendChild(b); });
+  const LY = [['events','事件','圆点越大越知名'],['context','其他时期的事件','灰色小点'],['settlements','聚居地与治所','空心点'],['routes','迁徙与远征路线',''],['polities','政权疆域','近似快照'],['borders','现代国界',''],['labels','现代地名','']];
+  const box = $('layers'); for (const [k, t, s] of LY){ const l = document.createElement('label'); l.innerHTML = `<input type="checkbox" id="ly_${k}" ${S.layers[k] ? 'checked' : ''}><span>${t}${s ? ` <small>${s}</small>` : ''}</span>`; box.appendChild(l);
+    l.firstChild.onchange = e => { S.layers[k] = e.target.checked; if (k === 'borders') map.setLayoutProperty('borders', 'visibility', e.target.checked ? 'visible' : 'none'); onWindow(); }; }
+  $('imp').onchange = e => { S.imp = +e.target.value; onWindow(); };
+  $('zin').onclick = () => map.zoomIn(); $('zout').onclick = () => map.zoomOut();
+  $('closePanel').onclick = () => { $('panel').hidden = true; S.sel = null; needLayers = true; };
+  $('toggleSide').onclick = () => { const c = $('side').classList.toggle('closed'); $('toggleSide').setAttribute('aria-expanded', !c); };
+  if (innerWidth < 760) $('side').classList.add('closed');
+  $('play').onclick = () => { S.playing = !S.playing; $('play').textContent = S.playing ? '❚❚ 暂停' : '▶ 播放'; if (S.playing && S.uc + S.uw/2 >= 1) S.uc = S.uw/2; lastT = 0; };
+  $('wNarrow').onclick = () => { S.uw /= 1.5; clampWin(); onWindow(); }; $('wWide').onclick = () => { S.uw *= 1.5; clampWin(); onWindow(); };
+  $('jump').addEventListener('keydown', e => { if (e.key !== 'Enter') return; const v = e.target.value.trim().replace(/^(公元)?前\s*/, '-').replace(/年$/, ''), y = parseInt(v, 10); if (!isNaN(y)){ stopPlay(); setYear(Math.max(TMIN, Math.min(TMAX, y)), true); } });
+  let st; $('search').addEventListener('input', e => { clearTimeout(st); st = setTimeout(() => doSearch(e.target.value.trim()), 180); });
+  initTimeline();
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
+  new MutationObserver(applyTheme).observe(document.documentElement, { attributes:true, attributeFilter:['data-theme'] });
+  addEventListener('resize', () => { labelsDirty = true; });
+}
+function doSearch(q){ const box = $('results'); box.innerHTML = ''; if (q.length < 2) return; const ql = q.toLowerCase(), hits = [];
+  for (let i = 0; i < E.n; i++) if (E.name[i].toLowerCase().includes(ql)) hits.push([E.s[i] + 5, 0, i]);
+  for (let i = 0; i < ST.n; i++) if (ST.name[i].toLowerCase().includes(ql)) hits.push([ST.s[i] === 1 ? 3 : 2, 1, i]);
+  hits.sort((a, b) => b[0] - a[0]);
+  for (const [, kind, i] of hits.slice(0, 40)){ const b = document.createElement('button');
+    if (kind === 0){ b.innerHTML = `<span class="dot" style="background:var(--c${E.c[i]})"></span><span style="min-width:0;overflow-wrap:anywhere">${esc(E.name[i])}</span><span class="yr" style="margin-left:auto">${fy(E.y[i])}</span>`;
+      b.onclick = () => go(E.lon[i], E.lat[i], E.y[i]); }
+    else { b.innerHTML = `<span class="dot" style="box-shadow:inset 0 0 0 1.5px var(--ink-2)"></span><span style="min-width:0;overflow-wrap:anywhere">${esc(ST.name[i])} <small style="color:var(--ink-3)">${esc(ST.types[ST.t[i]])}</small></span><span class="yr" style="margin-left:auto">${fspan(ST.a[i], ST.b[i])}</span>`;
+      b.onclick = () => go(ST.lon[i], ST.lat[i], Math.max(TMIN + 1, ST.a[i]) + 1); }
+    box.appendChild(b); }
+  if (!hits.length) box.innerHTML = '<div class="empty">没有匹配的记录</div>'; }
+function go(lon, lat, y){ stopPlay(); setYear(y, true); const z = Math.max(map.getZoom(), 6.5);
+  if (reduceMotion) map.jumpTo({ center:[lon, lat], zoom:z }); else map.flyTo({ center:[lon, lat], zoom:z, duration:1200 });
+  map.once('moveend', () => selectAt(lon, lat)); }
+
+/* ---------- frame loop ---------- */
+let lastT = 0, lastTrip = 0;
+function frame(t){
+  requestAnimationFrame(frame); if (!E) return; t = t || 0;
+  if (S.playing){ if (lastT){ S.uc += S.uw*(t - lastT)/3500; if (S.uc + S.uw/2 >= 1){ S.uc = 1 - S.uw/2; stopPlay(); } onWindow(); } lastT = t; }
+  if (labelsDirty && t - lastLabelT > 120){ labelsDirty = false; lastLabelT = t; buildLabels(); }
+  if (S.layers.routes && activeRoutes.length && !reduceMotion && !document.hidden && t - lastTrip > 33){ lastTrip = t; tripT = (t/6) % 1300; needLayers = true; }
+  if (needLayers){ needLayers = false; overlay.setProps({ layers: buildLayers() }); }
+}
+
+readTheme();
+load().catch(err => { $('loadMsg').textContent = err.message + '。请刷新重试。'; console.error(err); });
+})();
+</script>
+
+</body>
+</html>
