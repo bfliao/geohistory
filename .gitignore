@@ -1,0 +1,6 @@
+# raw downloads and fetch caches are reproducible with the pipeline scripts
+data/raw/
+data/work/
+__pycache__/
+node_modules/
+*.log
