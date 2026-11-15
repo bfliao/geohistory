@@ -1,5 +1,5 @@
 // Local preview server. Usage: node serve.js [port] [--vendor <dir>]
-// Wraps web/index.html in a minimal document skeleton (the page file itself has no <html>/<head>).
+// Serves web/index.html wrapped into a full document (same wrapper as build_site.js).
 // With --vendor, the two CDN scripts are served from <dir> (maplibre-gl.js, deck.min.js) for offline use.
 const http = require('http');
 const fs = require('fs');
@@ -12,10 +12,7 @@ const vendor = vi >= 0 ? path.resolve(args[vi + 1]) : null;
 const web = path.join(__dirname, 'web');
 const types = { '.json': 'application/json', '.js': 'text/javascript', '.html': 'text/html; charset=utf-8', '.css': 'text/css' };
 
-const head = '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">' +
-  '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">' +
-  '<style>:root{color-scheme:light;padding:env(safe-area-inset-top,0) 0 env(safe-area-inset-bottom,0)}' +
-  'body{margin:0;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style></head><body>';
+const { wrap } = require('./build_site.js');
 
 http.createServer((req, res) => {
   const url = decodeURIComponent(req.url.split('?')[0]);
@@ -26,7 +23,7 @@ http.createServer((req, res) => {
                  .replace(/https:\/\/unpkg\.com\/deck\.gl@[\d.]+\/dist\.min\.js/, '/vendor/deck.min.js');
     }
     res.writeHead(200, { 'content-type': types['.html'] });
-    return res.end(head + page + '</body></html>');
+    return res.end(wrap(page));
   }
   const base = url.startsWith('/vendor/') && vendor ? vendor : web;
   const file = path.normalize(path.join(base, url.replace(/^\/vendor\//, '/')));

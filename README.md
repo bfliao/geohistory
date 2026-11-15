@@ -8,6 +8,7 @@
 - `web/data/`：页面读取的数据文件（由 pipeline 生成）
 - `pipeline/`：数据采集与清洗脚本（Python）
 - `serve.js`：本地预览服务器
+- `build_site.js`、`deploy.sh`：打包静态站点并发布到 GitHub Pages
 - `data/raw/`：原始下载数据（体积大，不随包分发；按下文命令可重新获取）
 
 ## 本地运行
@@ -17,6 +18,16 @@ node serve.js 8080
 ```
 
 打开 http://localhost:8080 。页面从 unpkg 加载 MapLibre GL 4.7.1 和 deck.gl 9.1.14，需要联网。
+
+## 部署到 GitHub Pages
+
+```bash
+./deploy.sh
+```
+
+脚本先运行 `node build_site.js` 把 `web/` 打包成完整静态站点（`_site/`），再提交到 `gh-pages` 分支并推送。线上地址：https://bfliao.github.io/geohistory/
+
+首次部署需要在仓库 Settings → Pages 里把 Source 设为 “Deploy from a branch”，分支选 `gh-pages`、目录选 `/ (root)`。
 
 ## 重建数据
 
