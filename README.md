@@ -36,7 +36,8 @@ pip install requests numpy scipy pyshp opencc-python-reimplemented
 python3 pipeline/fetch_wikidata.py        # Wikidata 分时段抓取，可断点续跑
 python3 pipeline/classes.py               # 解析事件类别的上位类
 python3 pipeline/geonames_zh.py           # GeoNames 中文地名
-python3 pipeline/build_events.py          # 分类、取标签、挂接现代市县 -> web/data/events.json
+python3 pipeline/locations.py --all       # 事件登记的所在地、国家及其粒度（用于位置核对）
+python3 pipeline/build_events.py          # 分类、位置核对、取标签、挂接现代市县 -> web/data/events.json
 python3 pipeline/build_settlements.py     # Pleiades + CHGIS + Wikidata 聚居地 -> web/data/settlements.json
 python3 pipeline/routes_src.py            # 迁徙路线 -> web/data/routes.json
 ```
@@ -45,11 +46,30 @@ python3 pipeline/routes_src.py            # 迁徙路线 -> web/data/routes.json
 
 ## 数据模型
 
-事件（`events.json`，列式存储，按年份排序）：名称 `n`、简述 `d`、起始年 `y`、结束年 `e`、月日 `md`、经纬度 `x`/`la`、大类 `c`、知名度（维基语言版本数）`s`、现代市县索引 `p`、Wikidata 编号 `q`、细分类型 `t`。年份为负表示公元前。
+事件（`events.json`，列式存储，按年份排序）：名称 `n`、起始年 `y`、结束年 `e`、月日 `md`、经纬度 `x`/`la`、大类 `c`、位置精度 `pr`、知名度（维基语言版本数）`s`、现代市县索引 `p`、Wikidata 编号 `q`、细分类型 `t`；简述在 `events_d.json`。年份为负表示公元前。
 
 事件大类：0 战争与冲突，1 政治，2 灾害与事故，3 建城与建造，4 文化与科技，5 其他。
 
 现代市县归属：取事件坐标 40 km 内最近的 GeoNames 聚居点（人口 ≥1000），附带其二级、一级行政区和国家。这是近似做法，未使用行政区多边形。
+
+## 位置精度与核对
+
+Wikidata 的事件要么自带坐标（P625），要么只登记“所在地”（P276）。管线对每个落点做如下处理（`build_events.py` 的 `fix_positions`）：
+
+| 情况 | 处理 | 条数 |
+|---|---|---|
+| 自带坐标，落在登记的国家内 | 保留 | 73,358 |
+| 自带坐标，与登记的所在地相距 150 km 内 | 保留 | 23,997 |
+| 无自带坐标，所在地是城市、建筑或县市级区域 | 落在所在地上，标注“位置取自所在地” | 14,651 |
+| 自带坐标，但既无所在地也无国家可对照 | 保留，未核对 | 7,861 |
+| 所在地只有国家、大洲、海洋、省级大区 | 不标点，按时段列在侧栏（`events_nogeo.json`） | 5,926 |
+| 坐标远离登记的国家（多为殖民地、海上事件） | 保留，列入报告 | 152 |
+| 坐标有笔误证据（正负号、经纬互换、单个坐标错位） | 自动修正 | 29 |
+| 坐标与所在地相距 500 km 以上且无法判断哪个对 | 不标点 | 19 |
+
+所在地粒度按其类别和面积判定：聚落、建筑、遗址为点级；面积不超过 2 万平方公里的行政区、岛屿、湖泊为县市级；其余为大区域。战争、战役行动、疫情、政权建立等“范围性事件”即使有坐标也只是代表点，前端用空心圆显示（`pr = 2`）。
+
+核对明细写在 `data/work/position_report.json`。未核对和“远离登记国家”的条目里仍可能有错误坐标。
 
 ## 数据来源与许可
 
